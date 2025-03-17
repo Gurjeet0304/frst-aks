@@ -1,0 +1,39 @@
+parameters:
+  - name: serviceConnection
+    default: ""
+
+steps:
+  - task: AzureCLI@2
+    displayName: "Set Environment Variables for Terraform Providers"
+    inputs:
+      azureSubscription: ${{ parameters.serviceConnection }}
+      useGlobalConfig: true
+      scriptType: pscore
+      scriptLocation: inlineScript
+      addSpnToEnvironment: true
+      inlineScript: |
+        # azurerm
+        Write-Host "##vso[task.setvariable variable=ARM_USE_OIDC]true"
+        Write-Host "##vso[task.setvariable variable=ARM_OIDC_TOKEN]$($env:idToken)"
+        Write-Host "##vso[task.setvariable variable=ARM_CLIENT_ID]$($env:servicePrincipalId)"
+        Write-Host "##vso[task.setvariable variable=ARM_TENANT_ID]$($env:tenantId)"
+  - task: Bash@3
+    displayName: "Log into Azure CLI"
+    inputs:
+      targetType: "inline"
+      failOnStderr: true
+      script: |
+        az login --federated-token $ARM_OIDC_TOKEN --service-principal -u $ARM_CLIENT_ID -t $ARM_TENANT_ID
+  - task: Bash@3
+    displayName: "terraform init"
+    inputs:
+      targetType: "inline"
+      failOnStderr: true
+      script: |
+        terraform init
+  - task: Bash@3
+    inputs:
+      targetType: 'inline'
+      script: |      
+        terraform workspace select  -or-create dev
+    displayName: "Select Workspace"

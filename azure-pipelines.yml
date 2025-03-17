@@ -1,0 +1,81 @@
+variables:
+
+- name: environments
+  value: dev
+
+trigger:
+- main
+
+pool:
+  vmImage: ubuntu-latest
+stages:
+- ${{ each environment in split(variables.environments, ',')}}:
+  - stage: ${{ environment }}Deployment
+    jobs:
+      - job: TerraformPlan       
+        steps:
+        - task: TerraformInstaller@1
+          inputs:
+            terraformVersion: 'latest'
+        - template: pipeline/az-login-terraform-init.yml
+          parameters:
+            serviceconnection: 'frst-demo'
+        - task: TerraformTaskV4@4
+          inputs:
+            provider: 'azurerm'
+            command: 'plan'
+            commandOptions: '--var-file=_vars/dev.tfvars -out main.tfplan'
+            environmentServiceNameAzureRM: 'frst-demo'
+          displayName: Generate Plan
+        - script: |
+                terraform show main.tfplan
+          displayName: Terraform Plan show
+      - job: ManualApproval
+        displayName: Manual Validation Before Apply
+        dependsOn: TerraformPlan
+        pool: server  # Important for agentless validation
+        steps:
+        - task: ManualValidation@0
+          timeoutInMinutes: 60  # Timeout for approval
+          inputs:
+            notifyUsers: 'studymaterial.self@gmail.com' 
+            instructions: 'Please validate the Terraform plan before proceeding to apply in ${{ environment }}.'
+            onTimeout: 'reject' 
+      - job: TerraformApply
+        dependsOn: ManualApproval
+        
+        steps:
+        - template: pipeline/az-login-terraform-init.yml
+          parameters:
+            serviceconnection: 'frst-demo'
+        - task: TerraformTaskV4@4
+          inputs:
+            provider: 'azurerm'
+            command: 'apply'
+            commandOptions: '--var-file=_vars/dev.tfvars --auto-approve'
+            environmentServiceNameAzureRM: 'frst-demo'
+          displayName: Terraform Apply
+  - stage: DestroyEnvironment
+    jobs:
+      - job: ManualApproval
+        displayName: Manual Validation Before Apply
+        pool: server  
+        steps:
+        - task: ManualValidation@0
+          timeoutInMinutes: 60  # Timeout for approval
+          inputs:
+            notifyUsers: 'studymaterial.self@gmail.com' 
+            instructions: 'Please validate the Terraform Destroy'
+            onTimeout: 'reject' 
+      - job: TerraformDestroy
+        dependsOn: ManualApproval
+        steps:
+          - template: pipeline/az-login-terraform-init.yml
+            parameters:
+              serviceconnection: 'frst-demo'
+          - task: TerraformTaskV4@4
+            inputs:
+              provider: 'azurerm'
+              command: 'destroy'
+              commandOptions: '--var-file=_vars/dev.tfvars --auto-approve'
+              environmentServiceNameAzureRM: 'frst-demo'
